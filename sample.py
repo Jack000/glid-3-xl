@@ -35,7 +35,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model_path', type=str, default = 'diffusion.pt',
                    help='path to the diffusion model')
 
-parser.add_argument('--kl_path', type=str, default = 'kl-f8.ckpt',
+parser.add_argument('--kl_path', type=str, default = 'kl-f8.pt',
                    help='path to the LDM first stage model')
 
 parser.add_argument('--text', type = str, required = False,
@@ -140,7 +140,7 @@ ldm.eval()
 set_requires_grad(ldm, False)
 
 bert = BERTEmbedder(1280, 32)
-sd = torch.load('bert.ckpt', map_location="cpu")
+sd = torch.load('bert.pt', map_location="cpu")
 bert.load_state_dict(sd)
 
 bert.to(device)

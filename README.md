@@ -39,7 +39,7 @@ Train with same flags as guided diffusion. Data directory should contain image a
 ```
 # not possible to train on 24gb vram currently!
 MODEL_FLAGS="--ema_rate 0.9999 --attention_resolutions 32,16,8 --class_cond False --diffusion_steps 1000 --image_size 32 --learn_sigma False --noise_schedule linear --num_channels 320 --num_heads 8 --num_res_blocks 2 --resblock_updown False --use_fp16 True --use_scale_shift_norm False"
-TRAIN_FLAGS="--lr 1e-5 --batch_size 1 --log_interval 1 --save_interval 5000 --kl_model kl-f8.ckpt --resume_checkpoint diffusion.pt"
+TRAIN_FLAGS="--lr 1e-5 --batch_size 1 --log_interval 1 --save_interval 5000 --kl_model kl-f8.pt --resume_checkpoint diffusion.pt"
 export OPENAI_LOGDIR=./logs/
 export TOKENIZERS_PARALLELISM=false
 python scripts/image_train_latent.py --data_dir /path/to/data $MODEL_FLAGS $TRAIN_FLAGS

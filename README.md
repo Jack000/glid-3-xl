@@ -28,7 +28,7 @@ wget https://dall-3.com/models/glid-3-xl/diffusion.pt
 
 
 # fast PLMS sampling
-python sample.py --model_path diffusion.pt --kl_path kl-f8.ckpt --width 256 --height 256 --batch_size 6 --num_batches 6 --text "a cyberpunk girl with a scifi neuralink device on her head"
+python sample.py --model_path diffusion.pt --kl_path kl-f8.pt --width 256 --height 256 --batch_size 6 --num_batches 6 --text "a cyberpunk girl with a scifi neuralink device on her head"
 
 # generated images saved to ./output/
 ```

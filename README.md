@@ -1,4 +1,4 @@
-# GLID-3
+# GLID-3-XL
 
 GLID-3-xl is the [1.4B latent diffusion](https://github.com/CompVis/latent-diffusion#april-2022) model back-ported to the guided diffusion codebase
 

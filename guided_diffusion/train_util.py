@@ -81,14 +81,14 @@ class TrainLoop:
             self._load_optimizer_state()
             # Model was resumed, either due to a restart or a checkpoint
             # being specified at the command line.
-        #    self.ema_params = [
-        #        self._load_ema_parameters(rate) for rate in self.ema_rate
-        #    ]
-        #else:
-        #    self.ema_params = [
-        #        copy.deepcopy(self.mp_trainer.master_params)
-        #        for _ in range(len(self.ema_rate))
-        #    ]
+            self.ema_params = [
+                self._load_ema_parameters(rate) for rate in self.ema_rate
+            ]
+        else:
+            self.ema_params = [
+                copy.deepcopy(self.mp_trainer.master_params)
+                for _ in range(len(self.ema_rate))
+            ]
 
         if th.cuda.is_available():
             self.use_ddp = True
@@ -174,8 +174,8 @@ class TrainLoop:
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
         took_step = self.mp_trainer.optimize(self.opt)
-        #if took_step:
-        #    self._update_ema()
+        if took_step:
+            self._update_ema()
         self._warmup_lr()
         self._anneal_lr()
         self.log_step()
@@ -258,8 +258,8 @@ class TrainLoop:
                     th.save(state_dict, f)
 
         save_checkpoint(0, self.mp_trainer.master_params)
-        #for rate, params in zip(self.ema_rate, self.ema_params):
-        #    save_checkpoint(rate, params)
+        for rate, params in zip(self.ema_rate, self.ema_params):
+            save_checkpoint(rate, params)
 
         if dist.get_rank() == 0:
             with bf.BlobFile(

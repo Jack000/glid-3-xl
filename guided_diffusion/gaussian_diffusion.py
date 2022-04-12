@@ -517,6 +517,7 @@ class GaussianDiffusion:
             img = noise
         else:
             img = th.randn(*shape, device=device)
+            
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -672,6 +673,8 @@ class GaussianDiffusion:
         cond_fn=None,
         model_kwargs=None,
         device=None,
+        init_image=None,
+        skip_timesteps=0,
         progress=False,
         eta=0.0,
     ):
@@ -684,11 +687,20 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
+        
+        indices = list(range(self.num_timesteps - skip_timesteps))[::-1]
+        
         if noise is not None:
             img = noise
         else:
             img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1]
+            
+        if skip_timesteps and init_image is None:
+            init_image = th.zeros_like(img)
+            
+        if init_image is not None:
+            my_t = th.ones([shape[0]], device=device, dtype=th.long) * indices[0]
+            img = self.q_sample(init_image, my_t, img)
 
         if progress:
             # Lazy import so that we don't depend on tqdm.
@@ -802,6 +814,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        init_image=None,
+        skip_timesteps=0,
     ):
         """
         Use PRK to sample from the model and yield intermediate samples from
@@ -811,11 +825,20 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
+        indices = list(range(self.num_timesteps - skip_timesteps))[::-1][1:-1]
+
+        
         if noise is not None:
             img = noise
         else:
             img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1][1:-1]
+            
+        if skip_timesteps and init_image is None:
+            init_image = th.zeros_like(img)
+            
+        if init_image is not None:
+            my_t = th.ones([shape[0]], device=device, dtype=th.long) * indices[0]
+            img = self.q_sample(init_image, my_t, img)
 
         if progress:
             # Lazy import so that we don't depend on tqdm.
@@ -912,6 +935,8 @@ class GaussianDiffusion:
         cond_fn=None,
         model_kwargs=None,
         device=None,
+        init_image=None,
+        skip_timesteps=0,
         progress=False,
     ):
         """
@@ -922,12 +947,22 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
+        
+        indices = list(range(self.num_timesteps - skip_timesteps))[::-1]
+
+        
         if noise is not None:
             img = noise
         else:
             img = th.randn(*shape, device=device)
-        indices = list(range(self.num_timesteps))[::-1][1:-1]
-
+            
+        if skip_timesteps and init_image is None:
+            init_image = th.zeros_like(img)
+            
+        if init_image is not None:
+            my_t = th.ones([shape[0]], device=device, dtype=th.long) * indices[0]
+            img = self.q_sample(init_image, my_t, img)
+            
         if progress:
             # Lazy import so that we don't depend on tqdm.
             from tqdm.auto import tqdm

@@ -49,6 +49,12 @@ parser.add_argument('--text', type = str, required = False,
 parser.add_argument('--negative', type = str, required = False, default = '',
                     help='negative text prompt')
 
+parser.add_argument('--init_image', type=str, required = False, default = None,
+                   help='init image to use')
+
+parser.add_argument('--skip_timesteps', type=int, required = False, default = 0,
+                   help='how many diffusion steps are gonna be skipped')
+
 parser.add_argument('--prefix', type = str, required = False, default = '',
                     help='prefix for output files')
 
@@ -284,6 +290,15 @@ def do_run():
 
                 final_filename = f'output/{args.prefix}_{similarity.item():0.3f}_{i * args.batch_size + k:05}.png'
                 os.rename(filename, final_filename)
+                
+    if args.init_image:
+        init = Image.open(args.init_image).convert('RGB')
+        init = init.resize((int(args.width),  int(args.height)), Image.LANCZOS)
+        init = TF.to_tensor(init).to(device).unsqueeze(0).clamp(0,1)
+        h = ldm.encode(init * 2 - 1).sample() *  0.18215
+        init = torch.cat([h, h], dim=0)
+    else:
+        init = None
 
     for i in range(args.num_batches):
         cur_t = diffusion.num_timesteps - 1
@@ -296,6 +311,8 @@ def do_run():
             cond_fn=cond_fn if args.clip_guidance else None,
             device=device,
             progress=True,
+            init_image=init,
+            skip_timesteps=args.skip_timesteps,
         )
 
         for j, sample in enumerate(samples):

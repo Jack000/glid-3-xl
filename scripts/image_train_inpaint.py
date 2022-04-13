@@ -29,10 +29,19 @@ def main():
     dist_util.setup_dist()
     logger.configure()
 
+    from clip_custom import clip # make clip end up on the right device
+
+    logger.log("loading clip...")
+    clip_model, _ = clip.load('ViT-L/14', device=dist_util.dev(), jit=False)
+    clip_model.eval().requires_grad_(False)
+    set_requires_grad(clip_model, False)
+
+    del clip_model.visual
+
     logger.log("loading vae...")
 
     encoder = torch.load(args.kl_model, map_location="cpu")
-    encoder.to(dist_util.dev())
+    encoder.half().to(dist_util.dev())
     encoder.eval()
     set_requires_grad(encoder, False)
 
@@ -46,7 +55,7 @@ def main():
     sd = torch.load(args.bert_model, map_location="cpu")
     bert.load_state_dict(sd)
 
-    bert.to(dist_util.dev())
+    bert.half().to(dist_util.dev())
     bert.eval()
     set_requires_grad(bert, False)
 
@@ -65,6 +74,8 @@ def main():
     data = load_latent_data(
         encoder,
         bert,
+        clip_model,
+        clip,
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         image_size=args.image_size,
@@ -88,7 +99,7 @@ def main():
         lr_anneal_steps=args.lr_anneal_steps,
     ).run_loop()
 
-def load_latent_data(encoder, bert, data_dir, batch_size, image_size):
+def load_latent_data(encoder, bert, clip_model, clip, data_dir, batch_size, image_size):
     data = load_data(
         data_dir=data_dir,
         batch_size=batch_size,
@@ -104,11 +115,56 @@ def load_latent_data(encoder, bert, data_dir, batch_size, image_size):
 
         text_emb = bert.encode(text).to(dist_util.dev()).half()
 
+        clip_text = clip.tokenize(text, truncate=True).to(dist_util.dev())
+        clip_emb = clip_model.encode_text(clip_text)
+
         model_kwargs["context"] = text_emb
+        model_kwargs["clip_embed"] = clip_emb
 
         batch = batch.to(dist_util.dev())
-        emb = encoder.encode(batch).sample().half()
+        emb = encoder.encode(batch.half()).sample().half()
         emb *= 0.18215
+
+        emb_cond = emb.detach().clone()
+
+        for i in range(batch.shape[0]):
+            emb_cond[i] = emb[i]
+            rand_index = i
+            while rand_index == i:
+                rand_index = random.randint(0, batch.shape[0]-1)
+
+            # for randomness, use other images in the batch as a mask (need batch size > 1!)
+            mask = emb[rand_index].detach().clone().float()
+            q = random.uniform(0.05,0.95)
+            threshold = torch.quantile(mask, q)
+            mask1 = (mask>threshold)
+            mask2 = ~mask1
+            mask1 = mask1.float()
+            mask2 = mask2.float()
+            emb_cond[i] *= mask1
+            emb_cond[i] -= 10*mask2
+
+            # mask out 3 random rectangles
+            for j in range(random.randint(0,3)):
+                max_area = 32*16
+                w = random.randint(1,32)
+                h = random.randint(1,32)
+                if w*h > max_area:
+                    if random.randint(0,100) < 50:
+                        w = max_area//h
+                    else:
+                        h = max_area//w
+                if w == 32:
+                    offsetx = 0
+                else:
+                    offsetx = random.randint(0, 32-w)
+                if h == 32:
+                    offsety = 0
+                else:
+                    offsety = random.randint(0, 32-h)
+                emb_cond[i,:, offsety:offsety+h, offsetx:offsetx+w] = -10
+
+        model_kwargs["image_embed"] = emb_cond
 
         yield emb, model_kwargs
 
@@ -131,6 +187,10 @@ def create_argparser():
         bert_model=None,
     )
     defaults.update(model_and_diffusion_defaults())
+
+    defaults['clip_embed_dim'] = 768
+    defaults['image_condition'] = True
+
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser

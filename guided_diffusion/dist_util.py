@@ -25,6 +25,7 @@ def setup_dist():
     if dist.is_initialized():
         return
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}"
+#    th.cuda.set_device(MPI.COMM_WORLD.Get_rank())
 
     comm = MPI.COMM_WORLD
     backend = "gloo" if not th.cuda.is_available() else "nccl"
@@ -52,25 +53,7 @@ def dev():
 
 
 def load_state_dict(path, **kwargs):
-    """
-    Load a PyTorch file without redundant fetches across MPI ranks.
-    """
-    chunk_size = 2 ** 30  # MPI has a relatively small size limit
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        with bf.BlobFile(path, "rb") as f:
-            data = f.read()
-        num_chunks = len(data) // chunk_size
-        if len(data) % chunk_size:
-            num_chunks += 1
-        MPI.COMM_WORLD.bcast(num_chunks)
-        for i in range(0, len(data), chunk_size):
-            MPI.COMM_WORLD.bcast(data[i : i + chunk_size])
-    else:
-        num_chunks = MPI.COMM_WORLD.bcast(None)
-        data = bytes()
-        for _ in range(num_chunks):
-            data += MPI.COMM_WORLD.bcast(None)
-
+    with bf.BlobFile(path, "rb") as f: data = f.read()
     return th.load(io.BytesIO(data), **kwargs)
 
 

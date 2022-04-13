@@ -5,7 +5,7 @@ from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import UNetModel
 
-NUM_CLASSES = 1000
+NUM_CLASSES = 2
 
 
 def diffusion_defaults():
@@ -62,6 +62,10 @@ def model_and_diffusion_defaults():
 
         use_spatial_transformer=True,
         context_dim=1280,
+
+        clip_embed_dim=None,
+        image_condition=False,
+        super_res_condition=False
     )
     res.update(diffusion_defaults())
     return res
@@ -98,6 +102,9 @@ def create_model_and_diffusion(
     use_fp16,
     use_spatial_transformer,
     context_dim,
+    clip_embed_dim,
+    image_condition,
+    super_res_condition,
 ):
     model = create_model(
         image_size,
@@ -117,6 +124,9 @@ def create_model_and_diffusion(
         use_fp16=use_fp16,
         use_spatial_transformer=use_spatial_transformer,
         context_dim=context_dim,
+        clip_embed_dim=clip_embed_dim,
+        image_condition=image_condition,
+        super_res_condition=super_res_condition,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -149,6 +159,9 @@ def create_model(
     use_fp16=False,
     use_spatial_transformer=True,
     context_dim=1280,
+    clip_embed_dim=None,
+    image_condition=False,
+    super_res_condition=False
 ):
     if channel_mult == "":
         if image_size == 512:
@@ -192,6 +205,9 @@ def create_model(
         resblock_updown=resblock_updown,
         use_spatial_transformer=use_spatial_transformer,
         context_dim=context_dim,
+        clip_embed_dim=clip_embed_dim,
+        image_condition=image_condition,
+        super_res_condition=super_res_condition,
     )
 
 

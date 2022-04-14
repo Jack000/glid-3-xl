@@ -138,11 +138,8 @@ def load_latent_data(encoder, bert, clip_model, clip, data_dir, batch_size, imag
             q = random.uniform(0.05,0.95)
             threshold = torch.quantile(mask, q)
             mask1 = (mask>threshold)
-            mask2 = ~mask1
             mask1 = mask1.float()
-            mask2 = mask2.float()
             emb_cond[i] *= mask1
-            emb_cond[i] -= 10*mask2
 
             # mask out 3 random rectangles
             for j in range(random.randint(0,3)):
@@ -162,7 +159,7 @@ def load_latent_data(encoder, bert, clip_model, clip, data_dir, batch_size, imag
                     offsety = 0
                 else:
                     offsety = random.randint(0, 32-h)
-                emb_cond[i,:, offsety:offsety+h, offsetx:offsetx+w] = -10
+                emb_cond[i,:, offsety:offsety+h, offsetx:offsetx+w] = 0
 
         model_kwargs["image_embed"] = emb_cond
 

@@ -115,12 +115,37 @@ class TrainLoop:
         if resume_checkpoint:
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
             if dist.get_rank() == 0:
-                logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
-                self.model.load_state_dict(
-                    dist_util.load_state_dict(
+                if self.resume_step == 0:
+                    logger.log(f"loading model for the first time, will ignore missing layers if possible")
+                    state_dict = dist_util.load_state_dict(
                         resume_checkpoint, map_location=dist_util.dev()
-                    ), strict=True
-                )
+                    )
+
+                    model_state_dict = self.model.state_dict()
+                    for k in state_dict:
+                        if k in model_state_dict:
+                            if state_dict[k].shape != model_state_dict[k].shape:
+                                logger.info(f"Skip loading parameter: {k}, "
+                                            f"required shape: {model_state_dict[k].shape}, "
+                                            f"loaded shape: {state_dict[k].shape}")
+                                state_dict[k] = model_state_dict[k]
+                                if k.endswith('weight'):
+                                    kb = k.replace('weight','bias')
+                                    state_dict[kb] = model_state_dict[kb]
+                        else:
+                            logger.info(f"Dropping parameter {k}")
+
+                    self.model.load_state_dict(state_dict, strict=False)
+                    del state_dict
+                    del model_state_dict
+                    th.cuda.empty_cache()
+                else:
+                    logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
+                    self.model.load_state_dict(
+                        dist_util.load_state_dict(
+                            resume_checkpoint, map_location=dist_util.dev()
+                        ), strict=True
+                    )
 
         dist_util.sync_params(self.model.parameters())
 

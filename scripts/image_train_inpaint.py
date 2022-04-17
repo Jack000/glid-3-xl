@@ -106,6 +106,9 @@ def load_latent_data(encoder, bert, clip_model, clip, data_dir, batch_size, imag
         image_size=256,
         class_cond=False,
     )
+
+    blur = transforms.GaussianBlur(kernel_size=(15, 15), sigma=(0.1, 5))
+
     for batch, model_kwargs, text in data:
 
         text = list(text)
@@ -128,38 +131,36 @@ def load_latent_data(encoder, bert, clip_model, clip, data_dir, batch_size, imag
         emb_cond = emb.detach().clone()
 
         for i in range(batch.shape[0]):
-            emb_cond[i] = emb[i]
-            rand_index = i
-            while rand_index == i:
-                rand_index = random.randint(0, batch.shape[0]-1)
-
-            # for randomness, use other images in the batch as a mask (need batch size > 1!)
-            mask = emb[rand_index].detach().clone().float()
-            q = random.uniform(0.05,0.95)
-            threshold = torch.quantile(mask, q)
-            mask1 = (mask>threshold)
-            mask1 = mask1.float()
-            emb_cond[i] *= mask1
-
-            # mask out 3 random rectangles
-            for j in range(random.randint(0,3)):
-                max_area = 32*16
-                w = random.randint(1,32)
-                h = random.randint(1,32)
-                if w*h > max_area:
-                    if random.randint(0,100) < 50:
-                        w = max_area//h
-                    else:
-                        h = max_area//w
-                if w == 32:
-                    offsetx = 0
+            if random.randint(0,100) < 20:
+                emb_cond[i,:,:,:] = 0 # unconditional
+            else:
+                if random.randint(0,100) < 50:
+                    mask = torch.randn(1, 32, 32)
+                    mask = blur(mask)
+                    mask = (mask > 0)
+                    mask = mask.repeat(4, 1, 1)
+                    mask = mask.float()
+                    emb_cond[i] *= mask
                 else:
-                    offsetx = random.randint(0, 32-w)
-                if h == 32:
-                    offsety = 0
-                else:
-                    offsety = random.randint(0, 32-h)
-                emb_cond[i,:, offsety:offsety+h, offsetx:offsetx+w] = 0
+                    # mask out 4 random rectangles
+                    for j in range(random.randint(1,4)):
+                        max_area = 32*16
+                        w = random.randint(1,32)
+                        h = random.randint(1,32)
+                        if w*h > max_area:
+                            if random.randint(0,100) < 50:
+                                w = max_area//h
+                            else:
+                                h = max_area//w
+                        if w == 32:
+                            offsetx = 0
+                        else:
+                            offsetx = random.randint(0, 32-w)
+                        if h == 32:
+                            offsety = 0
+                        else:
+                            offsety = random.randint(0, 32-h)
+                        emb_cond[i,:, offsety:offsety+h, offsetx:offsetx+w] = 0
 
         model_kwargs["image_embed"] = emb_cond
 

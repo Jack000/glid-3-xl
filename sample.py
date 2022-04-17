@@ -49,6 +49,18 @@ parser.add_argument('--text', type = str, required = False, default = '',
 parser.add_argument('--edit', type = str, required = False,
                     help='path to the image you want to edit (either an image file or .npy containing a numpy array of the image embeddings)')
 
+parser.add_argument('--edit_x', type = int, required = False, default = 0,
+                    help='x position of the edit image in the generation frame (need to be multiple of 8)')
+
+parser.add_argument('--edit_y', type = int, required = False, default = 0,
+                    help='y position of the edit image in the generation frame (need to be multiple of 8)')
+
+parser.add_argument('--edit_width', type = int, required = False, default = 0,
+                    help='width of the edit image in the generation frame (need to be multiple of 8)')
+
+parser.add_argument('--edit_height', type = int, required = False, default = 0,
+                    help='height of the edit image in the generation frame (need to be multiple of 8)')
+
 parser.add_argument('--mask', type = str, required = False,
                     help='path to a mask image. white pixels = keep, black pixels = discard. width = image width/8, height = image height/8')
 
@@ -104,9 +116,9 @@ parser.add_argument('--ddpm', dest='ddpm', action='store_true') # turn on to use
 args = parser.parse_args()
 
 if args.edit and not args.mask:
-    from PyQt5.QtWidgets import *
-    from PyQt5.QtGui import *
-    from PyQt5.QtCore import *
+    from PyQt5.QtWidgets import QApplication, QMainWindow
+    from PyQt5.QtGui import QPainter, QPen
+    from PyQt5.QtCore import Qt, QPoint, QRect, QBuffer
     import PyQt5.QtGui as QtGui
 
     class Draw(QMainWindow):
@@ -313,27 +325,63 @@ def do_run():
     if args.edit:
         if args.edit.endswith('.npy'):
             with open(args.edit, 'rb') as f:
-                input_image = np.load(f)
-                input_image = torch.from_numpy(input_image).unsqueeze(0).to(device)
+                im = np.load(f)
+                im = torch.from_numpy(im).unsqueeze(0).to(device)
+
+                input_image = torch.zeros(1, 4, args.height//8, args.width//8, device=device)
+
+                y = args.edit_y//8
+                x = args.edit_x//8
+
+                ycrop = y + im.shape[2] - input_image.shape[2]
+                xcrop = x + im.shape[3] - input_image.shape[3]
+
+                ycrop = ycrop if ycrop > 0 else 0
+                xcrop = xcrop if xcrop > 0 else 0
+
+                input_image[0,:,y if y >=0 else 0:y+im.shape[2],x if x >=0 else 0:x+im.shape[3]] = im[:,:,0 if y > 0 else -y:im.shape[2]-ycrop,0 if x > 0 else -x:im.shape[3]-xcrop]
 
                 input_image_pil = ldm.decode(input_image)
                 input_image_pil = TF.to_pil_image(input_image_pil.squeeze(0).add(1).div(2).clamp(0, 1))
 
                 input_image *= 0.18215
         else:
-            input_image_pil = Image.open(fetch(args.edit)).convert('RGB')
-            input_image_pil = ImageOps.fit(input_image_pil, (args.width, args.height))
+            w = args.edit_width if args.edit_width else args.width
+            h = args.edit_height if args.edit_height else args.height
 
-            input_image = transforms.ToTensor()(input_image_pil).unsqueeze(0).to(device)
-            input_image = 2*input_image-1
-            input_image = 0.18215*ldm.encode(input_image).sample()
+            input_image_pil = Image.open(fetch(args.edit)).convert('RGB')
+            input_image_pil = ImageOps.fit(input_image_pil, (w, h))
+
+            input_image = torch.zeros(1, 4, args.height//8, args.width//8, device=device)
+
+            im = transforms.ToTensor()(input_image_pil).unsqueeze(0).to(device)
+            im = 2*im-1
+            im = ldm.encode(im).sample()
+
+            y = args.edit_y//8
+            x = args.edit_x//8
+
+            input_image = torch.zeros(1, 4, args.height//8, args.width//8, device=device)
+
+            ycrop = y + im.shape[2] - input_image.shape[2]
+            xcrop = x + im.shape[3] - input_image.shape[3]
+
+            ycrop = ycrop if ycrop > 0 else 0
+            xcrop = xcrop if xcrop > 0 else 0
+
+            input_image[0,:,y if y >=0 else 0:y+im.shape[2],x if x >=0 else 0:x+im.shape[3]] = im[:,:,0 if y > 0 else -y:im.shape[2]-ycrop,0 if x > 0 else -x:im.shape[3]-xcrop]
+
+            input_image_pil = ldm.decode(input_image)
+            input_image_pil = TF.to_pil_image(input_image_pil.squeeze(0).add(1).div(2).clamp(0, 1))
+
+            input_image *= 0.18215
 
         if args.mask:
             mask_image = Image.open(fetch(args.mask)).convert('L')
             mask_image = mask_image.resize((args.width//8,args.height//8), Image.ANTIALIAS)
             mask = transforms.ToTensor()(mask_image).unsqueeze(0).to(device)
         else:
-            print('starting qt5 app')
+            print('draw the area for inpainting, then close the window')
             app = QApplication(sys.argv)
             d = Draw(args.width, args.height, input_image_pil)
             app.exec_()
@@ -343,14 +391,14 @@ def do_run():
             mask = transforms.ToTensor()(mask_image).unsqueeze(0).to(device)
 
         mask1 = (mask > 0.5)
-        mask2 = ~mask1
         mask1 = mask1.float()
-        mask2 = mask2.float()
 
         input_image *= mask1
-        input_image -= 10*mask2
 
         image_embed = torch.cat(args.batch_size*2*[input_image], dim=0).float()
+    elif model_params['image_condition']:
+        # using inpaint model but no image is provided
+        image_embed = torch.zeros(args.batch_size*2, 4, args.height//8, args.width//8, device=device)
 
     kwargs = {
         "context": torch.cat([text_emb, text_blank], dim=0).float(),
@@ -418,13 +466,13 @@ def do_run():
             im = image.unsqueeze(0)
             out = ldm.decode(im)
 
-            npy_filename = f'output_npy/{args.prefix}_{i * args.batch_size + k:05}.npy'
+            npy_filename = f'output_npy/{args.prefix}{i * args.batch_size + k:05}.npy'
             with open(npy_filename, 'wb') as outfile:
                 np.save(outfile, image.detach().cpu().numpy())
 
             out = TF.to_pil_image(out.squeeze(0).add(1).div(2).clamp(0, 1))
 
-            filename = f'output/{args.prefix}_{i * args.batch_size + k:05}.png'
+            filename = f'output/{args.prefix}{i * args.batch_size + k:05}.png'
             out.save(filename)
 
             if clip_score:

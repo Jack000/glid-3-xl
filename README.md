@@ -75,6 +75,10 @@ python sample.py --mask mask.png --model_path inpaint.pt --edit output_npy/00000
 # additional arguments for uncropping
 python sample.py --edit_x 64 --edit_y 64 --edit_width 128 --edit_height 128 --model_path inpaint.pt --edit output_npy/00000.npy --batch_size 6 --num_batches 6 --text "your prompt"
 
+# autoedit uses the inpaint model to give the ldm an image prompting function (that works differently from --init_image)
+# it continuously edits random parts of the image to maximize clip score for the text prompt
+python autoedit.py --edit image.png --model_path inpaint.pt --batch_size 6 --text "your prompt"
+
 ```
 
 # Training/Fine tuning

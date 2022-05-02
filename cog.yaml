@@ -1,0 +1,43 @@
+image: "r8.im/jack000/glid-3-xl"
+build:
+  gpu: true
+
+  system_packages:
+    - "libopenmpi-dev"
+
+
+  python_version: "3.8"
+
+  python_packages:
+    - "axial-positional-embedding==0.2.1"
+    - "albumentations==0.4.3"
+    - "blobfile==1.2.9"
+    - "braceexpand==0.1.7"
+    - "cachetools==5.0.0"
+    - "DALL-E==0.1"
+    - "dalle-pytorch==1.5.2"
+    - "einops==0.4.1"
+    - "gpustat==0.6.0"
+    - "huggingface-hub==0.5.1"
+    - "imageio==2.9.0"
+    - "imageio-ffmpeg==0.4.2"
+    - "omegaconf==2.1.2"
+    - "pytorch-lightning==1.6"
+    - "PyYAML==6.0"
+    - "regex==2022.4.24"
+    - "rotary-embedding-torch==0.1.5"
+    - "tokenizers==0.12.1"
+    - "torch==1.11.0"
+    - "torchmetrics==0.8.0"
+    - "torchvision==0.12.0"
+    - "tqdm==4.64.0"
+    - "transformers==4.18.0"
+    - "torch-fidelity==0.3.0"
+  
+  run:
+    - mkdir -p /root/.cache/clip && wget --output-document "/root/.cache/clip/ViT-L-14.pt" "https://openaipublic.azureedge.net/clip/models/b8cca3fd41ae0c99ba7e8951adf17d267cdb84cd88be6f7c2e0eca1737a03836/ViT-L-14.pt"
+    - python3.8 -c 'from transformers import BertTokenizerFast; t = BertTokenizerFast.from_pretrained("bert-base-uncased");'
+
+
+# predict.py defines how predictions are run on your model
+predict: "predict.py:Predictor"

@@ -1,8 +1,11 @@
 # GLID-3-XL
 
+
 GLID-3-xl is the [1.4B latent diffusion](https://github.com/CompVis/latent-diffusion#april-2022) model from CompVis back-ported to the guided diffusion codebase
 
 The model has been split into three checkpoints. This lets us fine tune the diffusion model on new datasets and for additional tasks like inpainting and super-resolution
+
+<a href="https://replicate.com/jack000/glid-3-xl"><img src="https://replicate.com/jack000/glid-3-xl/badge"></a>
 
 # Install
 

@@ -1,11 +1,10 @@
+import random
 import sys
 import typing
 
 from PIL import Image
 
-import clip_custom
 from clip_custom import clip
-from clip_custom.model import convert_weights
 
 sys.path.append("latent-diffusion")
 
@@ -36,8 +35,7 @@ os.environ[
     "TOKENIZERS_PARALLELISM"] = "false"  # required to avoid errors with transformers lib
 
 
-def load_finetune(
-) -> typing.Tuple[torch.nn.Module, torch.nn.Module]:
+def load_finetune() -> typing.Tuple[torch.nn.Module, torch.nn.Module]:
     """
     Loads the model and diffusion from an fp16 version of the model.
     """
@@ -56,7 +54,7 @@ def load_finetune(
         'num_heads': 8,
         'num_res_blocks': 2,
         'resblock_updown': False,
-        'use_fp16': False,
+        'use_fp16': True,
         'use_scale_shift_norm': False,
         'clip_embed_dim': 768,
         # 'clip_embed_dim': 768 if 'clip_proj.weight' in model_state_dict else None,
@@ -66,8 +64,7 @@ def load_finetune(
     model_config.update(model_params)
     model, _ = create_model_and_diffusion(**model_config)
     model.load_state_dict(model_state_dict, strict=False)
-    # model.convert_to_fp16()
-    return model, model_params
+    return model, model_config
 
 
 class Predictor(cog.BasePredictor):
@@ -75,17 +72,23 @@ class Predictor(cog.BasePredictor):
     @torch.inference_mode(mode=True)
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
-        self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        torch.backends.cudnn.benchmark = True
 
         # Load the model and model_params
         print("Loading diffusion model")
-        self.model, self.model_params = load_finetune()
+        self.model, self.model_config = load_finetune()
         self.model.requires_grad_(False).eval().to(self.device)
+        if self.model_config['use_fp16']:
+            self.model.convert_to_fp16()
+        else:
+            self.model.convert_to_fp32()
 
         # Load CLIP text encoder from slim checkpoint
         print("Loading CLIP text encoder.")
-        self.clip_model, _ = clip.load('ViT-L/14', device=self.device, jit=False)
+        self.clip_model, _ = clip.load('ViT-L/14',
+                                       device=self.device,
+                                       jit=False)
         self.clip_model.eval().requires_grad_(False)
         self.clip_model.to(self.device)
         self.clip_preprocess = normalize
@@ -108,6 +111,7 @@ class Predictor(cog.BasePredictor):
         set_requires_grad(self.bert, False)
 
     @torch.inference_mode()
+    @torch.cuda.amp.autocast()
     def predict(
         self,
         prompt: str = cog.Input(description="Your text prompt.", default=""),
@@ -132,17 +136,18 @@ class Predictor(cog.BasePredictor):
         width: int = cog.Input(
             default=256,
             description="Target width",
-            choices=[128, 192, 256, 320, 384, 448, 512],
+            choices=[128, 192, 256, 320, 384],
         ),
         height: int = cog.Input(
             default=256,
             description="Target height",
-            choices=[128, 192, 256, 320, 384, 448, 512],
+            choices=[128, 192, 256, 320, 384],
         ),
         seed: int = cog.Input(
-            default=0,
+            default=-1,
             description="Seed for random number generator.",
-            ge=0,
+            ge=-1,
+            le=(2**32 - 1),
         ),
         guidance_scale: float = cog.Input(
             default=5.0,
@@ -158,15 +163,19 @@ class Predictor(cog.BasePredictor):
             ge=15,
         ),
     ) -> typing.Iterator[cog.Path]:
-
+        if seed == -1:
+            seed = random.randint(0, 2**32 - 1)
         torch.manual_seed(seed)
         # Create diffusion manually so we don't re-init the model just to change timestep_respacing
-        self.model_params["timestep_respacing"] = str(steps)
+        self.model_config["timestep_respacing"] = str(steps)
         self.diffusion = create_gaussian_diffusion(
-            steps=self.model_params["diffusion_steps"],
-            noise_schedule=self.model_params["noise_schedule"],
-            timestep_respacing=str(
-                steps),  # be sure not to confuse `steps` here.
+            steps=self.model_config["diffusion_steps"],
+            learn_sigma=self.model_config["learn_sigma"],
+            noise_schedule=self.model_config["noise_schedule"],
+            use_kl=self.model_config["use_kl"],
+            predict_xstart=self.model_config["predict_xstart"],
+            rescale_timesteps=self.model_config["rescale_timesteps"],
+            timestep_respacing=self.model_config["timestep_respacing"],
         )
 
         # Bert context
@@ -188,10 +197,10 @@ class Predictor(cog.BasePredictor):
         print("Packing CLIP and BERT embeddings into kwargs")
         kwargs = {
             "context":
-            torch.cat([text_emb, text_blank], dim=0).float(),
+            torch.cat([text_emb, text_blank], dim=0).half(),
             "clip_embed":
-            torch.cat([text_emb_clip, text_emb_clip_blank], dim=0).float()
-            if self.model_params['clip_embed_dim'] else None,
+            torch.cat([text_emb_clip, text_emb_clip_blank], dim=0).half()
+            if self.model_config['clip_embed_dim'] else None,
         }
 
         # Create a classifier-free guidance sampling function
@@ -205,12 +214,11 @@ class Predictor(cog.BasePredictor):
             eps = torch.cat([half_eps, half_eps], dim=0)
             return torch.cat([eps, rest], dim=1)
 
-
         images_per_row = batch_size
         if batch_size >= 6:
             images_per_row = batch_size // 2
 
-        def save_sample(i, sample):
+        def save_sample(sample):
             final_outputs = []
             for image in sample["pred_xstart"][:batch_size]:
                 image /= 0.18215
@@ -235,11 +243,15 @@ class Predictor(cog.BasePredictor):
             init = TF.to_tensor(init).to(self.device).unsqueeze(0).clamp(0, 1)
             h = self.ldm.encode(init * 2 - 1).sample() * 0.18215
             init = torch.cat(batch_size * 2 * [h], dim=0)
+            # str to int * float -> float
+            init_skip_timesteps = int(self.model_config["timestep_respacing"]) * init_skip_fraction
+            # float to int
+            init_skip_timesteps = int(init_skip_timesteps)
         else:
             init = None
             init_skip_fraction = 0.0
-        i = 0  #  TODO
-        final_step = steps - 3  # PLMS sampling skips the first two steps
+            init_skip_timesteps = 0
+
         sample_fn = self.diffusion.plms_sample_loop_progressive
         samples = sample_fn(
             model_fn, (batch_size * 2, 4, int(height / 8), int(width / 8)),
@@ -249,14 +261,13 @@ class Predictor(cog.BasePredictor):
             device=self.device,
             progress=True,
             init_image=init,
-            skip_timesteps=int(steps * init_skip_fraction)
-            if init_skip_fraction > 0.0 else 0)
+            skip_timesteps=init_skip_timesteps)
 
         print("Running diffusion...")
         for j, sample in tqdm(enumerate(samples)):
-            if j % 1 == 0 and j != final_step:
-                current_output = save_sample(i, sample)
+            if j % 1 == 0:
+                current_output = save_sample(sample)
                 TF.to_pil_image(current_output).save("current.png")
                 yield cog.Path("current.png")
 
-        print("Done")
+        print(f"Finished generating with seed {seed}")
